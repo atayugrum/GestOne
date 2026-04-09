@@ -1,9 +1,9 @@
-# Core computer vision and hand/face tracking
-opencv-python>=4.9
+opencv-python
 mediapipe==0.10.21
-# Mouse and keyboard control
-pyautogui>=0.9
-
-# Voice commands (Phase 4)
-SpeechRecognition>=3.10
-PyAudio>=0.2.14
+pyobjc-framework-Quartz
+pyobjc-framework-Cocoa
+rumps
+numpy
+SpeechRecognition
+sounddevice
+PyAudio

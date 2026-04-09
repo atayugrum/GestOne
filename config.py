@@ -22,11 +22,14 @@ CAMERA_WIDTH: int = 640
 CAMERA_HEIGHT: int = 480
 
 # ── Mouse control ────────────────────────────────────────────────────────────
-MOUSE_SMOOTHING_ALPHA: float = 0.25    # EMA weight; higher = more responsive, more jitter
+MOUSE_SMOOTHING_ALPHA: float = 0.20    # EMA weight; higher = more responsive, more jitter
 MOUSE_CLICK_COOLDOWN_SEC: float = 0.8  # min seconds between clicks
-MOUSE_PINCH_THRESHOLD: float = 0.26    # pinch_norm below this → click armed
-MOUSE_PINCH_RELEASE_THRESHOLD: float = 0.42  # must re-open above this before next click
+MOUSE_PINCH_THRESHOLD: float = 0.22    # pinch_norm below this → click armed
+MOUSE_PINCH_RELEASE_THRESHOLD: float = 0.35  # must re-open above this before next click
 MOUSE_DEADZONE_PX: float = 5.0         # pixel movement below this is suppressed
+MOUSE_DOUBLE_CLICK_TIMEOUT: float = 0.35 # Çift pinch için maksimum süre (saniye)
+MOUSE_HOLD_DRAG_DELAY_SEC: float = 0.18  # kısa pinch = click, daha uzun pinch = hold/drag
+MOUSE_SENSITIVITY_BOX: float = 0.4
 
 # ── Two-hand gestures ────────────────────────────────────────────────────────
 TWO_HAND_STABILITY_FRAMES: int = 5   # consecutive matching frames before firing
@@ -55,6 +58,7 @@ class GestOneConfig:
     mouse_pinch_threshold: float = MOUSE_PINCH_THRESHOLD
     mouse_pinch_release_threshold: float = MOUSE_PINCH_RELEASE_THRESHOLD
     mouse_deadzone_px: float = MOUSE_DEADZONE_PX
+    mouse_hold_drag_delay_sec: float = MOUSE_HOLD_DRAG_DELAY_SEC
     two_hand_stability_frames: int = TWO_HAND_STABILITY_FRAMES
     two_hand_cooldown_sec: float = TWO_HAND_COOLDOWN_SEC
     head_yaw_threshold: float = HEAD_YAW_THRESHOLD

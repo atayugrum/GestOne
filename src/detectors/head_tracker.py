@@ -1,174 +1,179 @@
-"""Head tracker — face-mesh-based head gesture detection.
-
-Detects three head gestures:
-  Turn_Left  → prev_track
-  Turn_Right → next_track
-  Nod_Down   → play_pause
-
-Consumes frames from shared CameraSource.
-"""
+"""Head Tracker — Face Mesh 2D Ratio + Posture & Presence Detection."""
 
 import time
 import threading
-from typing import Optional
-
-import cv2
+from collections import deque
 import mediapipe as mp
-
-from config import (
-    HEAD_YAW_THRESHOLD,
-    HEAD_PITCH_THRESHOLD,
-    HEAD_NEUTRAL_ZONE,
-    HEAD_STABILITY_FRAMES,
-    HEAD_SMOOTH_ALPHA,
-)
-from .base import BaseDetector, DetectionResult
+import numpy as np
+from typing import Optional
 from .camera_source import CameraSource
 
-_NOSE_TIP      = 1
-_LEFT_EYE_OUT  = 33
-_RIGHT_EYE_OUT = 263
-_CHIN          = 152
+class HeadTracker:
+    def __init__(self, camera_source: CameraSource, yaw_threshold: float = 1.4,
+                 stability_frames: int = 4, deadzone: float = 0.12, ema_alpha: float = 0.25, **kwargs):
+        self._cam = camera_source
+        self._lock = threading.Lock()
 
+        # Orijinal baş hareketleri
+        self._action: Optional[str] = None
+        self._raw: Optional[str] = None
 
-def _estimate_pose(face_lm) -> tuple[float, float]:
-    lm = face_lm.landmark
-    nose_x = lm[_NOSE_TIP].x
-    nose_y = lm[_NOSE_TIP].y
-    eye_mid_x = (lm[_LEFT_EYE_OUT].x + lm[_RIGHT_EYE_OUT].x) / 2.0
-    eye_mid_y = (lm[_LEFT_EYE_OUT].y + lm[_RIGHT_EYE_OUT].y) / 2.0
-    ref_y = (eye_mid_y + lm[_CHIN].y) / 2.0
-    yaw   = nose_x - eye_mid_x
-    pitch = nose_y - ref_y
-    return yaw, pitch
+        # Yeni: Varlık ve Sağlık
+        self._is_present: bool = False
+        self._posture_warning: Optional[str] = None
 
+        self._too_close_since: Optional[float] = None
+        self._slouch_since: Optional[float] = None
+        _TOO_CLOSE_AREA = 0.22   # face bbox > 22% of frame area → too close
+        _TOO_CLOSE_SEC  = 5.0    # must persist for 5 s before firing
+        _SLOUCH_SEC = 4.0        # poor posture must persist briefly before warning
+        self._TOO_CLOSE_AREA = _TOO_CLOSE_AREA
+        self._TOO_CLOSE_SEC  = _TOO_CLOSE_SEC
+        self._SLOUCH_SEC = _SLOUCH_SEC
 
-class HeadTracker(BaseDetector):
-    """Detects head gestures from a shared CameraSource."""
-
-    def __init__(
-        self,
-        camera_source: CameraSource,
-        yaw_threshold: float = HEAD_YAW_THRESHOLD,
-        pitch_threshold: float = HEAD_PITCH_THRESHOLD,
-        neutral_zone: float = HEAD_NEUTRAL_ZONE,
-        stability_frames: int = HEAD_STABILITY_FRAMES,
-        smooth_alpha: float = HEAD_SMOOTH_ALPHA,
-    ) -> None:
-        self._cam          = camera_source
-        self._yaw_thresh   = yaw_threshold
-        self._pitch_thresh = pitch_threshold
-        self._neutral_zone = neutral_zone
-        self._stability    = stability_frames
-        self._alpha        = smooth_alpha
-
-        self._lock         = threading.Lock()
-        self._stop_event   = threading.Event()
+        self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._pending: Optional[str] = None
-        self._current_label: Optional[str] = None
+        self._stability_frames = stability_frames
+        self._yaw_thresh = yaw_threshold
+        # Deadzone: ratio must exceed (1.0 + deadzone) before being considered a turn
+        self._deadzone = deadzone
+        # EMA for ratio smoothing — removes frame-to-frame jitter
+        self._ema_alpha = ema_alpha
+        self._smooth_ratio: float = 1.0
+        self._ratio_ma: deque = deque(maxlen=4)  # Stage 1: moving average
 
     def start(self) -> None:
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="head-loop")
         self._thread.start()
-        print("[head_tracker] started")
-
-    def stop(self) -> None:
-        self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=3)
-        print("[head_tracker] stopped")
-
-    def detect(self) -> Optional[DetectionResult]:
-        label = self.get_head_gesture()
-        return DetectionResult(label=label, confidence=1.0) if label else None
 
     def consume_action(self) -> Optional[str]:
         with self._lock:
-            action = self._pending
-            self._pending = None
-            return action
-
+            act = self._action
+            self._action = None
+            return act
+            
     def get_head_gesture(self) -> Optional[str]:
         with self._lock:
-            return self._current_label
+            return self._raw
+
+    # --- YENİ EKLENEN METOTLAR ---
+    def is_present(self) -> bool:
+        """Kamera kadrajında bir yüz olup olmadığını döner."""
+        with self._lock:
+            return self._is_present
+
+    def get_posture_warning(self) -> Optional[str]:
+        """Varsa duruş bozukluğu uyarısını döner ve sıfırlar."""
+        with self._lock:
+            w = self._posture_warning
+            self._posture_warning = None
+            return w
 
     def _run(self) -> None:
-        face_mesh = mp.solutions.face_mesh.FaceMesh(
-            static_image_mode=False,
+        mp_face_mesh = mp.solutions.face_mesh
+        with mp_face_mesh.FaceMesh(
             max_num_faces=1,
             refine_landmarks=False,
-            min_detection_confidence=0.5,
-            min_tracking_confidence=0.5,
-        )
+            min_detection_confidence=0.85,
+            min_tracking_confidence=0.85,
+        ) as face_mesh:
+            stable_action = None
+            count = 0
 
-        smooth_yaw: float = 0.0
-        smooth_pitch: float = 0.0
-        candidate_label: Optional[str] = None
-        stable_count: int = 0
-        active_gesture: Optional[str] = None
-
-        try:
             while not self._stop_event.is_set():
-                frame = self._cam.get_frame()
-                if frame is None:
+                rgb = self._cam.get_rgb_flipped()
+                if rgb is None:
                     time.sleep(0.01)
                     continue
 
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                 results = face_mesh.process(rgb)
 
-                if not results.multi_face_landmarks:
-                    smooth_yaw = 0.0
-                    smooth_pitch = 0.0
-                    candidate_label = None
-                    stable_count = 0
-                    active_gesture = None
-                    with self._lock:
-                        self._current_label = None
-                    continue
+                raw_action = None
+                is_pres = False
+                posture_warn = None
 
-                yaw_raw, pitch_raw = _estimate_pose(results.multi_face_landmarks[0])
-                smooth_yaw   = self._alpha * yaw_raw   + (1 - self._alpha) * smooth_yaw
-                smooth_pitch = self._alpha * pitch_raw + (1 - self._alpha) * smooth_pitch
-
-                zone = self._classify_zone(smooth_yaw, smooth_pitch)
-
-                if zone is None and active_gesture is not None:
-                    active_gesture  = None
-                    candidate_label = None
-                    stable_count    = 0
-
-                with self._lock:
-                    self._current_label = zone
-
-                if zone is not None and zone != active_gesture:
-                    if zone == candidate_label:
-                        stable_count += 1
+                if results.multi_face_landmarks:
+                    is_pres = True
+                    lm = results.multi_face_landmarks[0].landmark
+                    
+                    # Yüz hatları
+                    nose = lm[1]
+                    left_cheek = lm[234]
+                    right_cheek = lm[454]
+                    forehead = lm[10]
+                    chin = lm[152]
+                    
+                    # ── 1. ERGONOMİ ANALİZİ (POSTURE) ──
+                    # Face bounding-box area relative to frame (normalized [0,1]).
+                    # Large area = user too close to monitor.
+                    xs = [l.x for l in lm]
+                    ys = [l.y for l in lm]
+                    face_area = (max(xs) - min(xs)) * (max(ys) - min(ys))
+                    _now = time.monotonic()
+                    if face_area > self._TOO_CLOSE_AREA:
+                        if self._too_close_since is None:
+                            self._too_close_since = _now
+                        elif _now - self._too_close_since >= self._TOO_CLOSE_SEC:
+                            posture_warn = "too_close"
+                            self._too_close_since = None  # reset so it re-arms after recovery
                     else:
-                        candidate_label = zone
-                        stable_count    = 1
+                        self._too_close_since = None
 
-                    if stable_count >= self._stability:
-                        active_gesture = zone
-                        stable_count   = 0
-                        with self._lock:
-                            self._pending = zone
-                        print(f"[head_tracker] gesture → {zone}")
+                    # Head drifting lower in frame and nose moving closer to chin
+                    # both correlate better with slouch/neck collapse than nose.y alone.
+                    face_height = max(chin.y - forehead.y, 1e-4)
+                    nose_drop_ratio = (nose.y - forehead.y) / face_height
+                    is_slouching = nose.y > 0.69 and nose_drop_ratio > 0.60
+                    if is_slouching:
+                        if self._slouch_since is None:
+                            self._slouch_since = _now
+                        elif _now - self._slouch_since >= self._SLOUCH_SEC:
+                            posture_warn = posture_warn or "slouching"
+                    else:
+                        self._slouch_since = None
+                        
+                    # ── 2. BAŞ HAREKETİ (MEDIA KONTROLÜ) ──
+                    dist_left = abs(nose.x - left_cheek.x)
+                    dist_right = abs(nose.x - right_cheek.x)
+                    
+                    if dist_left > 0.001 and dist_right > 0.001:
+                        raw_ratio = dist_right / dist_left
+                        # Stage 1: moving average to kill sensor noise
+                        self._ratio_ma.append(raw_ratio)
+                        ma_ratio = float(np.mean(self._ratio_ma))
+                        # Stage 2: EMA for trajectory smoothing
+                        self._smooth_ratio = (
+                            self._ema_alpha * ma_ratio
+                            + (1.0 - self._ema_alpha) * self._smooth_ratio
+                        )
+                        ratio = self._smooth_ratio
+                        # Only fire outside the deadzone (neutral band around 1.0)
+                        if ratio > (1.0 + self._deadzone) and ratio > self._yaw_thresh:
+                            raw_action = "Turn_Left"
+                        elif ratio < (1.0 - self._deadzone) and (1.0 / ratio) > self._yaw_thresh:
+                            raw_action = "Turn_Right"
+
+                # Durumları Kilitleyerek Paylaş
+                with self._lock:
+                    self._raw = raw_action
+                    self._is_present = is_pres
+                    # Eğer yeni bir uyarı varsa ve önceki tüketildiyse üzerine yaz
+                    if posture_warn and not self._posture_warning:
+                        self._posture_warning = posture_warn
+
+                # Filtreleme (Titreme engelleme)
+                if raw_action == stable_action and raw_action is not None:
+                    count += 1
                 else:
-                    if zone != candidate_label:
-                        candidate_label = zone
-                        stable_count    = 0
+                    stable_action = raw_action
+                    count = 1
 
-        finally:
-            face_mesh.close()
+                if count >= self._stability_frames and stable_action:
+                    with self._lock:
+                        self._action = stable_action
+                    count = 0
 
-    def _classify_zone(self, yaw: float, pitch: float) -> Optional[str]:
-        if yaw > self._yaw_thresh:
-            return "Turn_Right"
-        if yaw < -self._yaw_thresh:
-            return "Turn_Left"
-        if pitch > self._pitch_thresh:
-            return "Nod_Down"
-        return None
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread: self._thread.join(timeout=3)

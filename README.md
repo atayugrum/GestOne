@@ -1,161 +1,170 @@
 # GestOne
 
-macOS-first multimodal desktop controller. Control your computer using hand gestures, two-hand gestures, head movement, and voice commands — all running locally with no cloud dependency.
+![GestOne Logo](GestOne_Logo.png)
+
+![macOS](https://img.shields.io/badge/macOS-000000?style=flat&logo=apple&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=flat&logo=python&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green?style=flat)
+![Status](https://img.shields.io/badge/Status-v1.0-blue?style=flat)
+
+**GestOne** is a lightweight macOS menu-bar app that lets you control your Mac entirely with your hands, head, and voice — no touch, no keyboard, no mouse required.
+
+It runs locally, starts instantly, and lives quietly in your menu bar until you need it.
 
 ---
 
 ## Features
 
-- **Gesture mode** — one-hand gestures trigger media actions (play/pause, volume, track skip)
-- **Mouse mode** — hand position controls the cursor; pinch gesture clicks
-- **Media mode** — gesture-based media control with two-hand gesture support
-- **Head mode** — head nod and turn gestures trigger media actions
-- **Voice mode** — stub, planned for Phase 4
-- **Dashboard** — lightweight tkinter UI to switch modes and tune settings
-- **Persistent config** — settings saved to `~/.gestone_config.json`
+| Feature | Description |
+|---|---|
+| **Zero-Latency Bufferless Camera** | Dedicated camera thread with direct frame grab — no buffering delay |
+| **True 3D Pinch-to-Click** | Depth-aware index-thumb distance detection for natural, precise clicking |
+| **Trackpad-like Momentum Scrolling** | V-sign gesture triggers smooth, inertia-based scroll |
+| **Slouch / Posture Warning** | Detects forward head drift and notifies you to sit up straight |
+| **Voice-Controlled Sleep Mode** | Say "uyku" or "sleep" to pause tracking hands-free |
+| **Context-Aware Actions** | Actions adapt to the frontmost app (Safari, Keynote, Spotify, etc.) |
+| **Auto-Calibration** | One-click pinch threshold calibration for your hand and lighting |
+| **Mode Switching** | Instantly switch between Mouse, Gesture, and Head tracking modes |
 
 ---
 
-## Supported control modes
+## Installation — End Users
 
-| Mode    | Input         | Actions                              |
-|---------|---------------|--------------------------------------|
-| gesture | One hand      | play/pause, volume up/down, next/prev |
-| mouse   | One hand      | cursor movement, pinch to click       |
-| media   | One/two hands | play/pause, next/prev, volume         |
-| head    | Face tracking | play/pause, next/prev track           |
-| voice   | Microphone    | not yet implemented                  |
+1. Go to the [**Releases**](../../releases) tab and download **GestOne.zip**
+2. Unzip the archive
+3. Move **GestOne.app** to your `/Applications` folder
+4. Double-click to launch
+
+On first launch, macOS will ask for:
+- **Camera access** — required for hand and head tracking
+- **Accessibility access** — required to move the cursor and send key events
+
+Grant both permissions in **System Settings → Privacy & Security**, then relaunch the app.
+
+> **Note:** If macOS says the app is from an unidentified developer, right-click the app → **Open** → **Open** to bypass Gatekeeper once.
 
 ---
 
-## Install (macOS)
-
-**Requirements:** Python 3.10+, macOS 12+, webcam
+## Installation — Developers
 
 ```bash
-# 1. Clone
+# 1. Clone the repo
 git clone https://github.com/your-username/GestOne.git
 cd GestOne
 
-# 2. Create virtual environment
-python3 -m venv .venv
+# 2. Create and activate a virtual environment
+python -m venv .venv
 source .venv/bin/activate
 
 # 3. Install dependencies
 pip install -r requirements.txt
-```
 
-### macOS permissions
-
-Grant these before running:
-
-- **Camera** — System Settings → Privacy & Security → Camera → Terminal (or your IDE)
-- **Accessibility** — System Settings → Privacy & Security → Accessibility → Terminal
-  - Required for `pyautogui` to move the cursor and simulate clicks
-
----
-
-## Run
-
-```bash
+# 4. Run directly
 python app.py
+
+# 5. Build a standalone .app bundle
+chmod +x build.sh
+./build.sh
 ```
 
-The dashboard window opens. Click a mode button to activate it. Close the dashboard to shut down all detectors.
+The built app will appear in `dist/GestOne.app`.
 
 ---
 
-## Configuration
+## Usage & Gestures
 
-Settings are saved automatically to `~/.gestone_config.json` when you click **Save** in the dashboard.
+### Mouse Mode (default)
+| Gesture | Action |
+|---|---|
+| Move index fingertip | Move cursor |
+| Pinch index + thumb | Left click (hold to drag) |
+| Pinch twice quickly | Double click |
+| V-sign (index + middle) moving up/down | Scroll |
 
-Editable fields:
+### Gesture / Media Mode
+| Gesture | Action |
+|---|---|
+| ✋ Open palm | Play / Pause |
+| 👍 Thumbs up | Volume up |
+| 👎 Thumbs down | Volume down |
+| ✌️ Victory sign | Next track |
 
-| Field                    | Description                            | Default |
-|--------------------------|----------------------------------------|---------|
-| `cooldown_sec`           | Min seconds between gesture actions    | 0.5     |
-| `mouse_smoothing_alpha`  | Cursor EMA smoothing (0=max, 1=raw)    | 0.25    |
-| `mouse_click_cooldown_sec` | Min seconds between pinch clicks     | 0.6     |
-| `mouse_pinch_threshold`  | Pinch distance to trigger click        | 0.055   |
-| `head_cooldown_sec`      | Min seconds between head actions       | 1.0     |
-| `two_hand_cooldown_sec`  | Min seconds between two-hand actions   | 1.2     |
+### Two-Hand Gestures (always active)
+| Gesture | Action |
+|---|---|
+| Both fists closed | Mission Control |
+| Two hands moving apart | Fullscreen |
+| Two hands moving together | Minimize window |
 
-Additional constants (camera index, thresholds, stability frames) are set in `config.py`.
+### Head Mode
+| Movement | Action |
+|---|---|
+| Turn head right | Next track |
+| Turn head left | Previous track |
 
----
-
-## Gesture / action reference
-
-### One-hand gestures (gesture and media modes)
-
-| Gesture     | Action      |
-|-------------|-------------|
-| Open Palm   | Play / Pause |
-| Thumb Up    | Volume Up   |
-| Thumb Down  | Volume Down |
-| Victory (✌) | Next Track  |
-
-### Head gestures (head mode)
-
-| Movement    | Action      |
-|-------------|-------------|
-| Nod down    | Play / Pause |
-| Turn right  | Next Track  |
-| Turn left   | Previous Track |
-
-### Two-hand gestures (gesture and media modes)
-
-Detected via `TwoHandGestureDetector`. Requires both hands visible for `stability_frames` consecutive frames before firing.
-
-### Mouse mode
-
-- Move hand in frame → cursor follows index finger tip
-- Pinch thumb + index → left click
+### Voice Commands
+| Command | Action |
+|---|---|
+| "Fare" / "Mouse" | Switch to Mouse mode |
+| "Jest" / "Gesture" | Switch to Gesture mode |
+| "Kafa" / "Head" | Switch to Head mode |
+| "Uyku" / "Sleep" | Pause GestOne |
+| "Oynat" / "Play" | Play / Pause |
+| "Sonraki" / "Next" | Next track |
+| "Önceki" / "Previous" | Previous track |
 
 ---
 
-## Known limitations
+## Menu Bar
 
-- **Camera conflict** — all detectors open the same camera index. On some machines this may cause frame drops. If you see issues, only activate one mode at a time.
-- **pyautogui safety margin** — `pyautogui` blocks cursor movement near screen edges by default (`FAILSAFE = True`). Moving to a top-left corner will raise an exception and exit.
-- **Voice mode is a stub** — the `VoiceController` class exists but does not yet capture or recognize audio.
-- **Two-hand detection sensitivity** — requires reasonable lighting and both hands clearly in frame.
-- **Head mode calibration** — thresholds in `config.py` are tuned for a 640×480 webcam at ~50cm distance. Adjust `head_yaw_threshold` and `head_pitch_threshold` if too sensitive or unresponsive.
-- **macOS only** — `pyautogui` cursor control and media key dispatch use macOS-specific behavior. Linux/Windows not tested.
-
----
-
-## Roadmap
-
-- [ ] Phase 4 — Real voice command recognition (Whisper or SpeechRecognition)
-- [ ] Phase 5 — Expanded dashboard: editable gesture→action mappings, per-mode sensitivity
-- [ ] Scroll mode in mouse mode (two-finger gesture)
-- [ ] Mode persistence across restarts
-- [ ] Packaging as a standalone `.app`
+Click the **🖐️** icon in the menu bar to:
+- Switch modes
+- Pause / resume tracking
+- Run auto-calibration for pinch sensitivity
+- Adjust mouse smoothness
+- Quit
 
 ---
 
-## Project structure
+## Architecture
 
 ```
-app.py               # Entry point and main loop
-config.py            # All constants and GestOneConfig dataclass
-src/
-  core/
-    dispatcher.py    # Action dispatch registry
-    modes.py         # Mode manager
-  detectors/
-    gesture_detector.py         # One-hand gesture detection
-    hand_mouse_tracker.py       # Hand position for mouse control
-    two_hand_gesture_detector.py
-    head_tracker.py
-    voice_controller.py         # Stub
-  controls/
-    mouse_controller.py
-    media_controller.py
-  ui/
-    dashboard.py     # tkinter dashboard
-  utils/
-    common.py        # Cooldown utility
-    config_persistence.py  # ~/.gestone_config.json read/write
+GestOne/
+├── app.py                  # Entry point, menu-bar app, main control loop
+├── config.py               # All thresholds, mode constants, defaults
+├── build.sh                # PyInstaller build script
+├── entitlements.plist      # macOS camera + mic entitlements
+└── src/
+    ├── core/
+    │   ├── modes.py        # Mode manager (mouse / gesture / head)
+    │   └── dispatcher.py   # Action dispatcher
+    ├── detectors/
+    │   ├── camera_source.py            # Dedicated capture thread
+    │   ├── gesture_detector.py         # Single-hand MediaPipe gestures
+    │   ├── hand_mouse_tracker.py       # Cursor position + pinch + scroll
+    │   ├── two_hand_gesture_detector.py# Two-hand gestures
+    │   ├── head_tracker.py             # Head yaw/pitch tracking
+    │   └── voice_controller.py         # Speech recognition
+    ├── controls/
+    │   ├── mouse_controller.py         # Low-level mouse events
+    │   └── media_controller.py         # Media key dispatch
+    └── utils/
+        ├── common.py                   # Cooldown, shared utilities
+        ├── one_euro_filter.py          # 1€ filter for cursor smoothing
+        └── config_persistence.py       # Save/load user overrides
 ```
+
+---
+
+## Requirements
+
+- macOS 12 Monterey or later (Apple Silicon and Intel)
+- Python 3.10+
+- A built-in or external webcam
+- Microphone (optional, for voice commands)
+
+---
+
+## License
+
+MIT License. See [LICENSE](LICENSE) for details.

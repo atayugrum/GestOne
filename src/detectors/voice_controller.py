@@ -1,8 +1,4 @@
-"""Voice controller — Phase 4: speech recognition command detection.
-
-Uses speech_recognition (Google backend) with graceful fallback if unavailable.
-Recognized commands route through the shared dispatcher via consume_action().
-"""
+"""Voice Controller — Background Speech Recognition Engine (Turkish & English Support)."""
 
 import threading
 import time
@@ -10,123 +6,85 @@ from typing import Optional
 
 try:
     import speech_recognition as sr
-    _SR_AVAILABLE = True
+    HAS_SR = True
 except ImportError:
-    _SR_AVAILABLE = False
-    print("[voice_controller] speech_recognition not installed — voice disabled")
+    HAS_SR = False
 
-from .base import BaseDetector, DetectionResult
-
-# Ordered longest-first so "volume up" matches before "volume"
-_COMMAND_MAP = {
-    "volume up":    "volume_up",
-    "volume down":  "volume_down",
-    "mouse mode":   "mode_mouse",
-    "gesture mode": "mode_gesture",
-    "head mode":    "mode_head",
-    "previous":     "prev_track",
-    "next":         "next_track",
-    "pause":        "play_pause",
-    "play":         "play_pause",
-    "back":         "prev_track",
-    "mouse":        "mode_mouse",
-    "gesture":      "mode_gesture",
-    "head":         "mode_head",
-}
-
-_VOICE_COOLDOWN_SEC = 1.5
-
-
-class VoiceController(BaseDetector):
+class VoiceController:
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._pending: Optional[str] = None
+        self._action: Optional[str] = None
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
-        self._last_action_time: float = 0.0
+
+        if HAS_SR:
+            self.recognizer = sr.Recognizer()
+            # Hoparlörden gelen müziği filtrelemek için ayarlar
+            self.recognizer.dynamic_energy_threshold = True 
+            self.recognizer.energy_threshold = 400 
+            self.recognizer.pause_threshold = 0.8
+            self.mic = sr.Microphone()
+        else:
+            self.recognizer = None
+            self.mic = None
 
     def start(self) -> None:
-        if not _SR_AVAILABLE:
-            print("[voice_controller] unavailable — skipping")
+        if not HAS_SR:
+            print("[voice_controller] speech_recognition yüklü değil. Terminale yazın: pip install SpeechRecognition pyaudio", flush=True)
             return
+            
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._run, daemon=True, name="voice-loop")
         self._thread.start()
-        print("[voice_controller] started")
+        print("[voice_controller] started listening in background (Turkish & English)", flush=True)
+
+    def consume_action(self) -> Optional[str]:
+        with self._lock:
+            a = self._action
+            self._action = None
+            return a
+
+    def _set_action(self, action: str) -> None:
+        with self._lock:
+            self._action = action
+
+    def _run(self) -> None:
+        with self.mic as source:
+            # Ortam gürültüsüne (müzik dahil) kalibrasyon
+            self.recognizer.adjust_for_ambient_noise(source, duration=2.0)
+            
+        while not self._stop_event.is_set():
+            try:
+                with self.mic as source:
+                    audio = self.recognizer.listen(source, timeout=1, phrase_time_limit=3)
+
+                text = self.recognizer.recognize_google(audio, language="tr-TR").lower()
+                print(f"[voice] Duyulan Komut: '{text}'", flush=True)
+                
+                if "uyut" in text or "kapat" in text or "sleep" in text or "dur" in text:
+                    self._set_action("sleep_mode")
+                elif "fare" in text or "mouse" in text:
+                    self._set_action("mode_mouse")
+                elif "kafa" in text or "baş" in text or "head" in text:
+                    self._set_action("mode_head")
+                elif "el" in text or "jest" in text or "hareket" in text or "gesture" in text:
+                    self._set_action("mode_gesture")
+                elif "oynat" in text or "başlat" in text or "play" in text or "pause" in text:
+                    self._set_action("play_pause")
+                elif "sonraki" in text or "geç" in text or "next" in text:
+                    self._set_action("next_track")
+                elif "önceki" in text or "geri" in text or "previous" in text or "prev" in text:
+                    self._set_action("prev_track")
+                elif "tam ekran" in text or "büyüt" in text or "fullscreen" in text:
+                    self._set_action("fullscreen")
+                    
+            except sr.WaitTimeoutError:
+                pass  
+            except sr.UnknownValueError:
+                pass  
+            except Exception as e:
+                time.sleep(1)
 
     def stop(self) -> None:
         self._stop_event.set()
-        if self._thread:
-            self._thread.join(timeout=4)
-        print("[voice_controller] stopped")
-
-    def detect(self) -> Optional[DetectionResult]:
-        action = self.consume_action()
-        if action:
-            return DetectionResult(label=action, confidence=1.0)
-        return None
-
-    def consume_action(self) -> Optional[str]:
-        """Return and clear the pending recognized action, or None."""
-        with self._lock:
-            action = self._pending
-            self._pending = None
-            return action
-
-    def _match_command(self, text: str) -> Optional[str]:
-        for phrase, action in _COMMAND_MAP.items():
-            if phrase in text:
-                return action
-        return None
-
-    def _run(self) -> None:
-        recognizer = sr.Recognizer()
-        recognizer.energy_threshold = 300
-        recognizer.dynamic_energy_threshold = True
-        recognizer.pause_threshold = 0.5
-
-        try:
-            mic = sr.Microphone()
-        except Exception as exc:
-            print(f"[voice_controller] microphone unavailable: {exc}")
-            return
-
-        print("[voice_controller] calibrating ambient noise (1s)…")
-        try:
-            with mic as source:
-                recognizer.adjust_for_ambient_noise(source, duration=1.0)
-        except Exception as exc:
-            print(f"[voice_controller] calibration failed: {exc}")
-            return
-
-        print("[voice_controller] listening")
-
-        while not self._stop_event.is_set():
-            try:
-                with mic as source:
-                    audio = recognizer.listen(source, timeout=1.0, phrase_time_limit=3.0)
-
-                text = recognizer.recognize_google(audio).lower()
-                print(f"[voice_controller] heard: {text!r}")
-
-                now = time.monotonic()
-                if now - self._last_action_time < _VOICE_COOLDOWN_SEC:
-                    continue
-
-                action = self._match_command(text)
-                if action:
-                    self._last_action_time = now
-                    with self._lock:
-                        self._pending = action
-                    print(f"[voice_controller] → {action}")
-
-            except sr.WaitTimeoutError:
-                pass
-            except sr.UnknownValueError:
-                pass
-            except sr.RequestError as exc:
-                print(f"[voice_controller] recognition error: {exc}")
-                time.sleep(2.0)
-            except Exception as exc:
-                print(f"[voice_controller] error: {exc}")
-                time.sleep(1.0)
+        if self._thread: self._thread.join(timeout=3)
