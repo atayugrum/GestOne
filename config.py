@@ -43,6 +43,10 @@ HEAD_STABILITY_FRAMES: int   = 8      # frames gesture must hold before firing (
 HEAD_COOLDOWN_SEC: float     = 1.2    # min seconds between head actions
 HEAD_SMOOTH_ALPHA: float     = 0.30   # EMA weight for yaw/pitch smoothing
 
+# ── UI & HUD ──────────────────────────────────────────────────────────────────
+HUD_DURATION_MS: int = 800
+CALIBRATION_HOLD_SECONDS: float = 3.0
+
 
 @dataclass
 class GestOneConfig:
@@ -67,6 +71,15 @@ class GestOneConfig:
     head_stability_frames: int = HEAD_STABILITY_FRAMES
     head_cooldown_sec: float = HEAD_COOLDOWN_SEC
     head_smooth_alpha: float = HEAD_SMOOTH_ALPHA
+    hud_duration_ms: int = HUD_DURATION_MS
+    calibration_hold_seconds: float = CALIBRATION_HOLD_SECONDS
+    enabled_features: Dict[str, bool] = field(default_factory=lambda: {
+        "media": True,
+        "mouse": True,
+        "head": True,
+        "two_hand": True,
+        "voice": True
+    })
     # gesture → action mapping; populated by each mode
     command_map: Dict[str, str] = field(default_factory=dict)
 

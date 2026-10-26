@@ -30,10 +30,13 @@ It runs locally, starts instantly, and lives quietly in your menu bar until you 
 
 ## Installation — End Users
 
-1. Go to the [**Releases**](../../releases) tab and download **GestOne.zip**
-2. Unzip the archive
-3. Move **GestOne.app** to your `/Applications` folder
-4. Double-click to launch
+> Prebuilt releases are not published yet. For now, [run from source](#installation--developers) or build the app yourself.
+
+Once a release is available:
+
+1. Go to the [**Releases**](../../releases) tab and download the latest `.dmg` or `.zip`
+2. Drag **GestOne.app** into `/Applications`
+3. Launch **GestOne.app**
 
 On first launch, macOS will ask for:
 - **Camera access** — required for hand and head tracking
@@ -41,7 +44,7 @@ On first launch, macOS will ask for:
 
 Grant both permissions in **System Settings → Privacy & Security**, then relaunch the app.
 
-> **Note:** If macOS says the app is from an unidentified developer, right-click the app → **Open** → **Open** to bypass Gatekeeper once.
+> **Note:** Camera and Accessibility approval are user-controlled macOS permissions and cannot be granted automatically. If a build is not signed and notarized, right-click the app → **Open** to get past Gatekeeper once.
 
 ---
 
@@ -49,7 +52,7 @@ Grant both permissions in **System Settings → Privacy & Security**, then relau
 
 ```bash
 # 1. Clone the repo
-git clone https://github.com/your-username/GestOne.git
+git clone https://github.com/atayugrum/GestOne.git
 cd GestOne
 
 # 2. Create and activate a virtual environment
@@ -67,7 +70,27 @@ chmod +x build.sh
 ./build.sh
 ```
 
-The built app will appear in `dist/GestOne.app`.
+The build will produce:
+- `dist/GestOne.app`
+- `dist/GestOne-macOS.zip`
+- `dist/GestOne-macOS.dmg`
+
+### Public Release Build
+
+For frictionless distribution to other Mac users, use:
+- a **Developer ID Application** certificate
+- **notarization**
+- a stapled `.app` inside a `.dmg` or `.zip`
+
+Example:
+
+```bash
+export APPLE_DEVELOPER_IDENTITY="Developer ID Application: Your Name (TEAMID)"
+export APPLE_NOTARY_PROFILE="gestone-notary"
+./build.sh
+```
+
+`APPLE_NOTARY_PROFILE` should be created once with `xcrun notarytool store-credentials`.
 
 ---
 
@@ -132,12 +155,22 @@ Click the **🖐️** icon in the menu bar to:
 GestOne/
 ├── app.py                  # Entry point, menu-bar app, main control loop
 ├── config.py               # All thresholds, mode constants, defaults
+├── controller.py           # JSON/function-call API for AI agents
+├── gesturely_display.py    # Standalone visual feedback app
 ├── build.sh                # PyInstaller build script
 ├── entitlements.plist      # macOS camera + mic entitlements
 └── src/
     ├── core/
     │   ├── modes.py        # Mode manager (mouse / gesture / head)
-    │   └── dispatcher.py   # Action dispatcher
+    │   ├── dispatcher.py   # Action dispatcher
+    │   ├── action_router.py# Routes gesture/voice/head actions to system commands
+    │   └── pinch_state.py  # Pinch state machine (click / double-click / drag)
+    ├── ui/
+    │   ├── menubar.py          # Menu-bar app and background detection worker
+    │   ├── settings_window.py  # Settings dashboard
+    │   ├── calibration.py      # Hand tracking zone calibration overlay
+    │   ├── hud_overlay.py      # Gesture feedback HUD
+    │   └── vision_window.py    # Hand tracking overlay window
     ├── detectors/
     │   ├── camera_source.py            # Dedicated capture thread
     │   ├── gesture_detector.py         # Single-hand MediaPipe gestures

@@ -7,3 +7,4 @@ numpy
 SpeechRecognition
 sounddevice
 PyAudio
+PyQt6

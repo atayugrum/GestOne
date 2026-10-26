@@ -14,6 +14,10 @@ EDITABLE_FIELDS = [
     "mouse_deadzone_px",
     "head_cooldown_sec",
     "two_hand_cooldown_sec",
+    "hud_duration_ms",
+    "calibration_hold_seconds",
+    "enabled_features",
+    "camera_index",
 ]
 
 
